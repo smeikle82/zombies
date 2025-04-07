@@ -5,5 +5,5 @@ old_spec_sheets/
 .cursor/
 
 # Ignore specific files in root
-specsheet_v0.2.txt
+current_specsheet.txt
 TODO.md 
