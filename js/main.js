@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const slowDownButton = document.getElementById('slowDownButton');
     const speedUpButton = document.getElementById('speedUpButton');
     const speedDisplay = document.getElementById('speedDisplay');
+    const gridToggle = document.getElementById('gridToggle');
+    const radiusToggle = document.getElementById('radiusToggle');
 
     const GRID_WIDTH = 50;
     const GRID_HEIGHT = 50;
@@ -54,17 +56,67 @@ document.addEventListener('DOMContentLoaded', () => {
         context.fillStyle = '#333'; // Background for empty cells
         context.fillRect(0, 0, context.canvas.width, context.canvas.height);
 
+        // --- Draw Grid (Conditional) ---
+        if (gridToggle.checked) {
+            context.strokeStyle = '#444'; // Dark gray for grid lines
+            context.lineWidth = 1;
+
+            // Vertical lines
+            for (let x = 0; x <= context.canvas.width; x += cellSize) {
+                context.beginPath();
+                context.moveTo(x, 0);
+                context.lineTo(x, context.canvas.height);
+                context.stroke();
+            }
+
+            // Horizontal lines
+            for (let y = 0; y <= context.canvas.height; y += cellSize) {
+                context.beginPath();
+                context.moveTo(0, y);
+                context.lineTo(context.canvas.width, y);
+                context.stroke();
+            }
+        }
+        // --- End Grid Draw ---
+
         // Draw entities (Humans and Zombies) using VISUAL coordinates
         for (const entity of sim.entities.values()) {
+
+            // --- Draw Armed Human Range Indicator (Conditional) ---
+            if (radiusToggle.checked && entity.type === 'HUMAN' && entity.hasWeapon && typeof entity.visualX !== 'undefined') {
+                const range = 10; // The current detection range
+                const centerX = entity.visualX * cellSize + cellSize / 2;
+                const centerY = entity.visualY * cellSize + cellSize / 2;
+                const radius = range * cellSize;
+
+                context.strokeStyle = 'rgba(255, 255, 0, 0.3)'; // Faint yellow
+                context.lineWidth = 1;
+                context.beginPath();
+                context.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+                context.stroke();
+            }
+            // --- End Range Indicator ---
+
             if (entity.type === 'HUMAN' || entity.type === 'ZOMBIE') {
                 if (typeof entity.visualX !== 'undefined' && typeof entity.visualY !== 'undefined') {
-                    context.fillStyle = entity.color;
+                    // Determine color based on state
+                    let drawColor = entity.color;
+                    if (entity.type === 'HUMAN' && entity.hasWeapon && entity.weaponCooldown > 0) {
+                        drawColor = 'yellow'; // Cooldown color
+                    } else if (entity.type === 'HUMAN' && entity.hasWeapon) {
+                        drawColor = 'orange'; // Default armed color (ensure it overrides default white if needed)
+                    } else {
+                         drawColor = entity.color; // Default color (unarmed human, zombie, etc.)
+                    }
+                    context.fillStyle = drawColor;
+
                     // Use visualX/visualY for drawing position
                     context.fillRect(entity.visualX * cellSize, entity.visualY * cellSize, cellSize, cellSize);
                 } else {
                      // Fallback or error if visual coords are missing (shouldn't happen after setup)
-                     console.warn(`Entity ${entity.id} missing visual coordinates.`);
-                     context.fillStyle = entity.color;
+                     // Log the problematic entity object itself for inspection
+                     console.warn(`Entity ${entity.id} missing visual coordinates. Type: ${entity.type}. Entity:`, entity);
+                     context.fillStyle = entity.color; // Use original color in fallback
                      context.fillRect(entity.x * cellSize, entity.y * cellSize, cellSize, cellSize);
                 }
             } else if (entity.type === 'OBSTACLE') {
@@ -84,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Simulation Loop (Fixed Interval) ---
     function simulationStep() {
         if (!simulation || isPaused) return;
+        console.log("DEBUG SIMSTEP: Entered simulationStep, about to call simulation.tick().");
         simulation.tick(); // Only update simulation state
     }
 
@@ -183,8 +236,77 @@ document.addEventListener('DOMContentLoaded', () => {
     slowDownButton.addEventListener('click', () => changeSpeed(-1));
     speedUpButton.addEventListener('click', () => changeSpeed(1));
 
+    // Added listeners for toggles
+    gridToggle.addEventListener('change', () => {
+        if (isPaused) {
+            drawSimulation(simulation, ctx, CELL_SIZE); // Redraw immediately if paused
+        }
+    });
+    radiusToggle.addEventListener('change', () => {
+        if (isPaused) {
+            drawSimulation(simulation, ctx, CELL_SIZE); // Redraw immediately if paused
+        }
+    });
+
     // --- Initial Setup ---
     updateSpeedDisplay(); // Set initial speed display
     setupSimulation();
-    startSimulation(); // Start the simulation and rendering loops
+
+    // --- Add Click Listener for Debugging ---
+    canvas.addEventListener('click', (event) => {
+        if (!simulation) return; // Don't do anything if sim isn't ready
+
+        const rect = canvas.getBoundingClientRect();
+        const clickX = event.clientX - rect.left;
+        const clickY = event.clientY - rect.top;
+
+        const gridX = Math.floor(clickX / CELL_SIZE);
+        const gridY = Math.floor(clickY / CELL_SIZE);
+
+        // Check bounds
+        if (gridX < 0 || gridX >= simulation.gridWidth || gridY < 0 || gridY >= simulation.gridHeight) {
+            console.log(`Clicked outside grid bounds at (${gridX}, ${gridY})`);
+            return;
+        }
+
+        const entity = simulation.getEntityAt(gridX, gridY);
+
+        if (entity && (entity.type === 'HUMAN' || entity.type === 'ZOMBIE')) {
+            console.log('--- Entity Clicked ---');
+            console.log(`ID: ${entity.id}`);
+            console.log(`Type: ${entity.type}`);
+            console.log(`Position (Grid): (${entity.x}, ${entity.y})`);
+            if (typeof entity.visualX !== 'undefined') {
+                 console.log(`Position (Visual): (${entity.visualX.toFixed(2)}, ${entity.visualY.toFixed(2)})`);
+            }
+
+            if (entity.type === 'HUMAN') {
+                console.log(`State: ${entity.state}`);
+                console.log(`Armed: ${entity.hasWeapon}`);
+                console.log(`Weapon Cooldown: ${entity.weaponCooldown}`);
+                console.log(`Attacked This Tick: ${entity.hasAttackedThisTick}`);
+                // Note: intendedMove might be null or reflect the *previous* tick's intention depending on timing
+                console.log(`Stored Intended Move: ${JSON.stringify(entity.intendedMove)}`);
+            } else if (entity.type === 'ZOMBIE') {
+                 console.log(`State: ${entity.state}`);
+                 console.log(`Stored Intended Move: ${JSON.stringify(entity.intendedMove)}`);
+            }
+             console.log('--- End Entity Info ---');
+        } else if (entity && entity.type === 'WEAPON') {
+             console.log(`Clicked Weapon ID: ${entity.id} at (${gridX}, ${gridY})`);
+        } else if (entity && entity.type === 'OBSTACLE') {
+             console.log(`Clicked Obstacle at (${gridX}, ${gridY})`);
+        } else {
+            console.log(`Clicked empty cell at (${gridX}, ${gridY})`);
+        }
+    });
+    // --- End Click Listener ---
+
+    // --- Start Paused --- 
+    isPaused = true;
+    pauseResumeButton.textContent = 'Resume';
+    drawSimulation(simulation, ctx, CELL_SIZE); // Draw the initial state once
+    console.log("Simulation initialized and paused.");
+    // The simulation and render loops will start when the user clicks 'Resume'.
+    // --- End Start Paused ---
 }); 

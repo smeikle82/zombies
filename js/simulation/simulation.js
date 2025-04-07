@@ -1,5 +1,8 @@
 // simulation.js
 
+// --- Constants ---
+const HUMAN_WEAPON_COOLDOWN = 5; // Ticks cooldown after attacking
+
 class Simulation {
     constructor(gridWidth, gridHeight) {
         this.gridWidth = gridWidth;
@@ -257,6 +260,26 @@ class Simulation {
         return dx + dy;
     }
 
+    // Calculates the Octile distance between two points on a toroidal grid.
+    // Suitable heuristic for A* with 8-directional movement.
+    // Cost: Cardinal=1, Diagonal=sqrt(2)
+    calculateToroidalOctileDistance(x1, y1, x2, y2) {
+        let dx = Math.abs(x1 - x2);
+        let dy = Math.abs(y1 - y2);
+
+        // Consider wrap-around
+        if (dx > this.gridWidth / 2) {
+            dx = this.gridWidth - dx;
+        }
+        if (dy > this.gridHeight / 2) {
+            dy = this.gridHeight - dy;
+        }
+
+        const F = Math.SQRT2 - 1; // Cost difference (sqrt(2) - 1)
+        return (dx > dy) ? (F * dy + dx) : (F * dx + dy); // Octile formula
+        // Equivalent to: return Math.max(dx, dy) + F * Math.min(dx, dy);
+    }
+
     findNearestHuman(zombieX, zombieY) {
         let nearestHuman = null;
         let minDistance = Infinity;
@@ -280,20 +303,19 @@ class Simulation {
         const intentions = []; // { entityId, targetX, targetY }
         const movingEntities = []; // Keep track of entities that intend to move
 
-        this.entities.forEach(entity => {
-            if (entity.type === 'HUMAN' || entity.type === 'ZOMBIE') {
+        // --- Use Array.from for safer iteration ---
+        Array.from(this.entities.values()).forEach(entity => {
+            // Only gather intentions for entities that CAN move/act
+            if ((entity.type === 'HUMAN' && !entity.hasAttackedThisTick) || entity.type === 'ZOMBIE') {
                 const intent = entity.getIntendedMove(this);
                 if (intent) {
                      intentions.push({ entityId: entity.id, targetX: intent.targetX, targetY: intent.targetY });
                      movingEntities.push(entity); // Add entity itself for potential later use
-                } else {
-                    // Handle cases where getIntendedMove might return null/undefined if needed
-                    console.warn(`Entity ${entity.id} did not produce an intended move.`);
                 }
             }
         });
         // Return both intentions and the list of entities that generated them
-        return { intentions, movingEntities }; 
+        return { intentions, movingEntities };
     }
 
     _resolveConflicts(intentions) {
@@ -318,7 +340,6 @@ class Simulation {
 
             // --- Check if target is an Obstacle first --- 
             if (targetEntity && targetEntity.type === 'OBSTACLE') {
-                // console.log(`Move failed: Target (${targetX},${targetY}) is an Obstacle.`);
                 continue; // No entity can move into an obstacle, skip to next target cell
             }
             // --- End Obstacle Check ---
@@ -335,7 +356,6 @@ class Simulation {
                     } else if (targetEntity && targetEntity.type === 'HUMAN') { // Target human
                         successfulMoves.push({ entityId: entity.id, newX: targetX, newY: targetY });
                         infections.add(targetEntity.id);
-                         console.log(`Infection: Zombie ${entity.id} targets Human ${targetEntity.id} at (${targetX},${targetY})`);
                     } // else if (targetEntity.type === 'ZOMBIE') { Move fails }
 
                 } else if (entity.type === 'HUMAN') {
@@ -355,7 +375,6 @@ class Simulation {
                             // Found a zombie trying to infect the human in this cell
                             zombieInfectsHumanId = entityId;
                             infections.add(targetEntity.id);
-                            console.log(`Conflict Resolution: Zombie ${entityId} infection prioritized for Human ${targetEntity.id} at (${targetX},${targetY})`);
                             break; // Prioritize the first one found for simplicity
                         }
                     }
@@ -364,11 +383,9 @@ class Simulation {
                 if (zombieInfectsHumanId !== null) {
                     // Only the infecting zombie's move succeeds for this target cell
                     successfulMoves.push({ entityId: zombieInfectsHumanId, newX: targetX, newY: targetY });
-                    console.log(`Conflict Resolution: All other moves to (${targetX},${targetY}) cancelled due to prioritized infection.`);
                 } else {
                     // No prioritized infection OR target cell wasn't a human.
                     // Multiple entities targeting same empty/zombie cell. All fail.
-                    console.log(`Conflict: Multiple entities [${occupantIds.join(', ')}] targeting (${targetX},${targetY}), no prioritized infection or target not human. All moves fail.`);
                 }
                  // In both conflict cases (prioritized infection or general clash),
                  // only the explicitly added moves (if any) proceed. Others implicitly fail.
@@ -400,22 +417,18 @@ class Simulation {
              if (move.newX === 0 && entity.x === this.gridWidth - 1) {
                  // Wrapped from right edge to left edge
                  entity.visualX -= this.gridWidth; // Move visualX off-screen to the left
-                  console.log(`Entity ${entity.id} visualX wrap R->L: ${entity.visualX + this.gridWidth} -> ${entity.visualX}`);
              } else if (move.newX === this.gridWidth - 1 && entity.x === 0) {
                  // Wrapped from left edge to right edge
                  entity.visualX += this.gridWidth; // Move visualX off-screen to the right
-                  console.log(`Entity ${entity.id} visualX wrap L->R: ${entity.visualX - this.gridWidth} -> ${entity.visualX}`);
              }
  
              // Check if the entity wrapped around vertically
              if (move.newY === 0 && entity.y === this.gridHeight - 1) {
                  // Wrapped from bottom edge to top edge
                  entity.visualY -= this.gridHeight; // Move visualY off-screen upwards
-                  console.log(`Entity ${entity.id} visualY wrap B->T: ${entity.visualY + this.gridHeight} -> ${entity.visualY}`);
              } else if (move.newY === this.gridHeight - 1 && entity.y === 0) {
                  // Wrapped from top edge to bottom edge
                  entity.visualY += this.gridHeight; // Move visualY off-screen downwards
-                  console.log(`Entity ${entity.id} visualY wrap T->B: ${entity.visualY - this.gridHeight} -> ${entity.visualY}`);
              }
               // --- End wrap-around adjustment ---
  
@@ -435,7 +448,6 @@ class Simulation {
                      if (weapon.x === entity.x && weapon.y === entity.y) {
                          entity.hasWeapon = true;
                          weaponToRemoveId = weaponId;
-                         console.log(`Human ${entity.id} picked up Weapon ${weaponId} at (${entity.x}, ${entity.y})`);
                          break; // Assume only one weapon per cell can be picked up per tick
                      }
                  }
@@ -452,37 +464,339 @@ class Simulation {
              const humanEntity = this.entities.get(humanId); // Get the original human object
              // Check if the entity still exists and is indeed a Human (might have been removed/changed differently)
              if (humanEntity && humanEntity.type === 'HUMAN') {
-                 console.log(`Applying infection to Human ${humanId} at (${humanEntity.x}, ${humanEntity.y})`);
- 
                  const newZombie = new Zombie(humanEntity.x, humanEntity.y);
                  newZombie.id = humanEntity.id; // Re-use ID
- 
+
+                 // Initialize visual coordinates for the new zombie
+                 newZombie.visualX = newZombie.x;
+                 newZombie.visualY = newZombie.y;
+
                  this.entities.delete(humanId); // Remove human from master list
                  this.entities.set(newZombie.id, newZombie); // Add new zombie to master list
  
                  // Update the grid to point to the new Zombie object
                  this.grid[newZombie.y][newZombie.x] = newZombie;
- 
-                 console.log(`Human ${humanId} turned into Zombie ${newZombie.id}`);
              } else {
                   console.warn(`Attempted to infect entity ${humanId}, but it was not found or not a Human.`);
              }
          });
     }
 
+    // New method to handle combat phase
+    _resolveCombat() {
+        const zombiesToRemove = new Set(); // IDs of zombies defeated this tick
+        const zombiesTargetedThisTick = new Set(); // Prevent multiple humans targeting the same zombie
+
+        // Find humans who can potentially attack
+        const potentialAttackers = [];
+        // --- Use Array.from for safer iteration ---
+        Array.from(this.entities.values()).forEach(entity => {
+            if (entity.type === 'HUMAN' && entity.hasWeapon && entity.weaponCooldown === 0 && !entity.hasAttackedThisTick) {
+                potentialAttackers.push(entity);
+            }
+        });
+        // --- End Finding Attackers ---
+
+        // Randomize attacker order slightly to avoid positional bias if multiple humans can attack the same zombie
+        potentialAttackers.sort(() => Math.random() - 0.5);
+
+        potentialAttackers.forEach(human => {
+             if (human.hasAttackedThisTick) return; // Skip if already attacked (e.g., by an earlier attacker in this loop)
+
+            // Get adjacent cells, INCLUDING diagonals for attack check
+            const adjacentCells = this.getAdjacentCells(human.x, human.y, true); 
+
+            let attackedZombie = false;
+            for (const cell of adjacentCells) {
+                const targetEntity = this.getEntityAt(cell.x, cell.y);
+
+                if (targetEntity && targetEntity.type === 'ZOMBIE' && !zombiesTargetedThisTick.has(targetEntity.id)) {
+                    console.log(`Combat: Human ${human.id} attacks Zombie ${targetEntity.id} at (${cell.x}, ${cell.y})`);
+
+                    zombiesToRemove.add(targetEntity.id);
+                    zombiesTargetedThisTick.add(targetEntity.id); // Mark this zombie as targeted
+
+                    human.weaponCooldown = HUMAN_WEAPON_COOLDOWN;
+                    human.hasAttackedThisTick = true; // Mark human as having acted
+
+                    attackedZombie = true;
+                    break; // Human attacks only one zombie per tick
+                }
+            }
+        });
+
+        // Remove defeated zombies
+        zombiesToRemove.forEach(zombieId => {
+            console.log(`Removing defeated Zombie ${zombieId}`);
+            this.removeEntity(zombieId);
+        });
+    }
+
+    // Helper to get adjacent cell coordinates with toroidal wrapping
+    getAdjacentCells(x, y, includeDiagonals = false) {
+        const adjacent = [];
+        const deltas = [
+            { dx: 0, dy: -1 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 } // Cardinal
+        ];
+        if (includeDiagonals) {
+            deltas.push(
+                { dx: -1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: -1 }, { dx: 1, dy: 1 } // Diagonal
+            );
+        }
+
+        deltas.forEach(delta => {
+            const newX = (x + delta.dx + this.gridWidth) % this.gridWidth;
+            const newY = (y + delta.dy + this.gridHeight) % this.gridHeight;
+            adjacent.push({ x: newX, y: newY });
+        });
+
+        return adjacent;
+    }
+
     tick() {
-        console.log("Tick starting...");
+        try { // <--- Start Try Block
+            console.log("DEBUG TICK: ------------- Tick function START -------------");
 
-        // 1. Determine Intentions
-        const { intentions, movingEntities } = this._gatherIntentions(); 
+            // 0. Update Cooldowns and Reset Flags
+            Array.from(this.entities.values()).forEach(entity => {
+                if (entity.type === 'HUMAN') {
+                    entity.hasAttackedThisTick = false; // Reset attack flag
 
-        // 2. Resolve Conflicts & Determine Outcomes (Movement/Infection)
-        const { successfulMoves, infections } = this._resolveConflicts(intentions);
+                    // Decrease weapon cooldown
+                    if (entity.weaponCooldown > 0) {
+                        entity.weaponCooldown--;
+                    }
+                }
+                // Reset intention
+                 entity.intendedMove = null;
+            });
 
-        // 3. Apply State Changes (Movement, Pickups, Infections)
-        this._applyStateChanges(successfulMoves, infections);
-        console.log("Tick finished.");
+            // 1. Resolve Combat
+            this._resolveCombat();
+
+            // 2. Determine Intentions
+            const { intentions, movingEntities } = this._gatherIntentions();
+
+            // 3. Resolve Conflicts
+            const { successfulMoves, infections } = this._resolveConflicts(intentions);
+
+            // 4. Apply State Changes
+            this._applyStateChanges(successfulMoves, infections);
+
+            console.log("DEBUG TICK: ------------- Tick function END -------------  ");
+
+        } catch (error) { // <--- Catch Block
+            console.error("ERROR INSIDE TICK FUNCTION:", error);
+        }
+    }
+
+    /**
+     * Finds the nearest entity of a specific type relative to a starting point.
+     * @param {number} startX - The starting X coordinate.
+     * @param {number} startY - The starting Y coordinate.
+     * @param {string} entityType - The type of entity to search for ('HUMAN', 'ZOMBIE').
+     * @param {number} [maxDistance=Infinity] - The maximum distance to search.
+     * @param {function|null} [filterFn=null] - An optional function to further filter entities. Takes entity as argument, returns true if valid.
+     * @returns {Entity|null} The nearest matching entity or null if none found within range.
+     */
+    findNearestEntity(startX, startY, entityType, maxDistance = Infinity, filterFn = null) {
+        let nearestEntity = null;
+        let minDistance = maxDistance;
+
+        for (const entity of this.entities.values()) {
+            if (entity.type === entityType) {
+                 // Skip self if applicable (e.g., finding nearest *other* human)
+                 if (entity.x === startX && entity.y === startY) {
+                    continue;
+                 }
+
+                // Apply optional filter function
+                if (filterFn && !filterFn(entity)) {
+                    continue;
+                }
+
+                const distance = this.calculateToroidalDistance(startX, startY, entity.x, entity.y);
+
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    nearestEntity = entity;
+                }
+            }
+        }
+        // Ensure the found entity is actually within the original maxDistance threshold
+        // (minDistance starts at maxDistance, so this check is important)
+         if (nearestEntity && minDistance <= maxDistance) {
+            return nearestEntity;
+         } else {
+             return null;
+         }
+    }
+
+    /**
+     * Determines the best single step (move) towards a target coordinate using A* with 8-directional movement.
+     * Considers toroidal distance and obstacles.
+     * @param {number} startX - The starting X coordinate.
+     * @param {number} startY - The starting Y coordinate.
+     * @param {number} targetX - The target X coordinate.
+     * @param {number} targetY - The target Y coordinate.
+     * @param {Entity} [movingEntity=null] - Optional: The entity attempting the move, used for context-specific pathfinding rules.
+     * @returns {{targetX: number, targetY: number}|null} The coordinates of the best next cell, or null if no valid move improves distance.
+     */
+    getMoveTowards(startX, startY, targetX, targetY, movingEntity = null) {
+        // --- A* Pathfinding Implementation ---
+
+        // Handle start === target
+        if (startX === targetX && startY === targetY) { return null; }
+
+        // Helper function for heuristic (Octile distance with toroidal wrap)
+        const heuristic = (x1, y1, x2, y2) => {
+            return this.calculateToroidalOctileDistance(x1, y1, x2, y2);
+        };
+
+        const startNode = {
+            x: startX,
+            y: startY,
+            gCost: 0,
+            hCost: heuristic(startX, startY, targetX, targetY),
+            fCost: 0, // Will be set below
+            parent: null
+        };
+        startNode.fCost = startNode.gCost + startNode.hCost;
+
+        const openSet = [startNode]; // Array acting as a simple priority queue
+        const closedSet = new Set(); // Stores "x,y" keys of evaluated nodes
+        const nodeMap = new Map();   // Stores node objects by "x,y" key for quick lookup
+        nodeMap.set(`${startX},${startY}`, startNode);
+
+        const maxSteps = this.gridWidth * this.gridHeight * 2; // Generous safety break
+        let steps = 0;
+
+        while (openSet.length > 0 && steps < maxSteps) {
+            steps++;
+
+            // --- Find and remove node with lowest fCost from openSet ---
+            openSet.sort((a, b) => a.fCost - b.fCost); // Sort to simulate priority queue
+            const currentNode = openSet.shift();
+            const currentKey = `${currentNode.x},${currentNode.y}`;
+            // ---------------------------------------------------------
+
+            // Add to closed set (we've processed this node)
+            closedSet.add(currentKey);
+
+            // --- Target Found: Reconstruct Path --- 
+            if (currentNode.x === targetX && currentNode.y === targetY) {
+                let pathNode = currentNode;
+                let parent = pathNode.parent;
+
+                // Traverse back until the node whose parent is the start node
+                while (parent && parent.parent !== null) {
+                    pathNode = parent;
+                    parent = pathNode.parent;
+                }
+
+                // If parent is null, we started AT the target (handled at the top).
+                // If parent.parent is null, then 'parent' is the startNode, and pathNode is the first step.
+                if (parent) { // Ensure parent exists (i.e., we didn't start AT the target)
+                     // console.log(`DEBUG A*: Path found! First step: (${pathNode.x}, ${pathNode.y})`);
+                     return { targetX: pathNode.x, targetY: pathNode.y };
+                } else if (pathNode !== startNode) {
+                     // This case handles when the target is directly adjacent to the start
+                     // parent is startNode (parent.parent is null), pathNode is the target itself
+                     // console.log(`DEBUG A*: Path found! Target is adjacent: (${pathNode.x}, ${pathNode.y})`);
+                     return { targetX: pathNode.x, targetY: pathNode.y };
+                 } else {
+                      // Should not happen if start != target
+                      console.error("A* path reconstruction failed: parent is null but pathNode is startNode.");
+                      return null;
+                 }
+            }
+            // --- End Target Found --- 
+
+            // --- Explore Neighbors (8 Directions) --- 
+            const possibleMoves = [
+                // Cardinal (cost 1)
+                { dx: 0, dy: -1, cost: 1 }, // Up
+                { dx: 0, dy: 1, cost: 1 },  // Down
+                { dx: -1, dy: 0, cost: 1 }, // Left
+                { dx: 1, dy: 0, cost: 1 },  // Right
+                // Diagonal (cost sqrt(2))
+                { dx: -1, dy: -1, cost: Math.SQRT2 }, // Up-Left
+                { dx: -1, dy: 1, cost: Math.SQRT2 },  // Down-Left
+                { dx: 1, dy: -1, cost: Math.SQRT2 },  // Up-Right
+                { dx: 1, dy: 1, cost: Math.SQRT2 }   // Down-Right
+            ];
+
+            for (const move of possibleMoves) {
+                const nextX = (currentNode.x + move.dx + this.gridWidth) % this.gridWidth;
+                const nextY = (currentNode.y + move.dy + this.gridHeight) % this.gridHeight;
+                const neighborKey = `${nextX},${nextY}`;
+
+                // Skip if already evaluated
+                if (closedSet.has(neighborKey)) {
+                    continue;
+                }
+
+                // --- Check Validity (Obstacles & Corner Cutting) --- 
+                const entityAtNext = this.getEntityAt(nextX, nextY);
+                if (entityAtNext && entityAtNext.type === 'OBSTACLE') {
+                     // console.log(`DEBUG A*: Neighbor (${nextX},${nextY}) skipped, is OBSTACLE.`);
+                    continue; // Cannot move directly into an obstacle
+                }
+
+                // Corner Cutting Prevention (for diagonal moves)
+                if (move.cost > 1) { // If it's a diagonal move
+                    const adjacentX1 = (currentNode.x + move.dx + this.gridWidth) % this.gridWidth; // Check cell at (curr.x + dx, curr.y)
+                    const entityAdj1 = this.getEntityAt(adjacentX1, currentNode.y);
+
+                    const adjacentY2 = (currentNode.y + move.dy + this.gridHeight) % this.gridHeight; // Check cell at (curr.x, curr.y + dy)
+                    const entityAdj2 = this.getEntityAt(currentNode.x, adjacentY2);
+
+                    if ((entityAdj1 && entityAdj1.type === 'OBSTACLE') || (entityAdj2 && entityAdj2.type === 'OBSTACLE')) {
+                        // console.log(`DEBUG A*: Diagonal move to (${nextX},${nextY}) skipped, corner cutting blocked.`);
+                        continue; // Cannot cut corner past an obstacle
+                    }
+                }
+                // --- End Validity Check --- 
+
+                // Calculate costs for this neighbor
+                const tentativeGCost = currentNode.gCost + move.cost; // USE MOVE COST
+                const neighborHCost = heuristic(nextX, nextY, targetX, targetY);
+                const neighborFCost = tentativeGCost + neighborHCost;
+
+                // Check if neighbor is in openSet or if this path is better
+                const existingNode = nodeMap.get(neighborKey);
+
+                if (!existingNode || tentativeGCost < existingNode.gCost) {
+                    // Found a better path OR it's a new node we haven't seen
+
+                    // Get or create the node object
+                    const neighborNode = existingNode || { x: nextX, y: nextY, parent: null, gCost: Infinity, hCost: Infinity, fCost: Infinity };
+
+                    // Update its properties
+                    neighborNode.parent = currentNode;
+                    neighborNode.gCost = tentativeGCost;
+                    neighborNode.hCost = neighborHCost;
+                    neighborNode.fCost = neighborFCost;
+
+                    nodeMap.set(neighborKey, neighborNode); // Update/add to map
+
+                    // Add to openSet if it's not already there (to be processed)
+                    if (!existingNode) {
+                        openSet.push(neighborNode);
+                         // console.log(`DEBUG A*: Added neighbor (${nextX},${nextY}) to openSet. fCost: ${neighborFCost}`);
+                    }
+                    // If it *was* already in openSet, the sort at the start of the while
+                    // loop will ensure we pick the one with the potentially updated lower fCost next time.
+                }
+            }
+            // --- End Explore Neighbors --- 
+        }
+
+        // No path found within maxSteps
+        // console.warn(`A* pathfinding failed from (${startX},${startY}) to (${targetX},${targetY}) after ${steps} steps.`);
+        return null;
     }
 }
 
-// Make available globally for main.js 
+// Make available globally for main.js
+window.Simulation = Simulation; 
