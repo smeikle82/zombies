@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zombie Outbreak Simulation v0.2</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Zombie Outbreak Simulation v0.2</h1>
+
+    <div id="controls">
+        <button id="resetButton">Reset</button>
+        <button id="pauseResumeButton">Pause</button>
+        <button id="slowDownButton">-</button>
+        <span id="speedDisplay">Speed: 2 TPS</span>
+        <button id="speedUpButton">+</button>
+    </div>
+
+    <canvas id="simulationCanvas"></canvas>
+
+    <!-- Load scripts in order -->
+    <script src="entity.js"></script>
+    <script src="simulation.js"></script>
+    <script src="main.js"></script>
+</body>
+</html> 

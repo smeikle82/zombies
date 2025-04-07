@@ -1,0 +1,106 @@
+Project Specification Sheet: Zombie Outbreak Simulator (Grid-based)
+
+Version: 0.2 (Reflecting Current Implementation)
+Date: April 7, 2024
+
+1. Project Overview:
+A simple, web-based simulation modeling a zombie outbreak on a 2D grid. Inspired by Conway's Game of Life but with active entities and direct interactions. The simulation visualizes the spread of zombies as they infect humans upon collision. Includes basic UI controls.
+
+2. Core Concept:
+Entities (Humans, Zombies) move on a grid. Zombies hunt nearby Humans. When a Zombie successfully moves into a Human's cell, the Human becomes a Zombie almost immediately. Weapons exist visually but are not interactive.
+
+3. Target Platform:
+Modern Web Browsers supporting HTML5, CSS3, and JavaScript (ES6+).
+
+4. Technology Stack:
+
+HTML: Structure the webpage (simulation display area, UI controls).
+CSS: Basic styling for the page elements.
+JavaScript: Core simulation logic, entity management, state updates, rendering (HTML Canvas API), and UI interactions.
+
+5. Environment Specifications:
+
+Type: 2D Grid.
+Size: 50x50 cells.
+Boundaries: Toroidal (entities wrapping around edges).
+Obstacles: None in this version (open field).
+
+6. Entity Specifications:
+
+Humans:
+Representation: Colored block/square.
+Color: White. (Note: `hasWeapon` state exists but is unused, orange color not implemented).
+Initial State: ALIVE, hasWeapon = false.
+Behavior: Attempts a persistent random walk each tick. Favors continuing in the current direction (80% chance) over changing direction (20% chance) to a random adjacent cell (excluding immediate 180-degree reversal).
+Movement Constraints: Can only successfully move into an empty cell. Respects toroidal boundaries. Move intention determined first, validated during conflict resolution.
+
+Zombies:
+Representation: Colored block/square.
+Color: Green.
+Initial State: ZOMBIE.
+Behavior: Attempts to move towards the nearest Human (using toroidal distance) each tick. Targets an adjacent cell that reduces the distance to the nearest Human. If no Humans are present, falls back to a simple random walk (attempts to move to a random adjacent cell).
+Movement Constraints: Can successfully move into an empty cell or a cell occupied by a Human. Cannot move into cells occupied by other Zombies. Respects toroidal boundaries. Move intention determined first, validated/resolved during conflict resolution.
+
+Weapons:
+Representation: Colored block/square.
+Color: Red.
+Initial State: ON_GROUND.
+Behavior: Stationary. No interaction logic implemented. Entities can occupy the same grid cell as a weapon without effect.
+
+7. Core Mechanics:
+
+Simulation Loop: The simulation state updates at a fixed rate, defaulting to 8 times per second (every 125 milliseconds). The speed is adjustable via UI controls (1-20 TPS). Uses `setInterval` for simulation ticks and `requestAnimationFrame` for rendering with interpolation for smoother visuals.
+Update Logic (per tick - Order: Intentions -> Resolution -> State Changes):
+    1. Determine Intentions: For each Human and Zombie, determine its intended target cell based on its behavior (persistent random walk for Humans, hunting/random for Zombies).
+    2. Resolve Conflicts & Interactions:
+        - Target Cell Occupancy: Identify all entities intending to move into each specific target cell.
+        - Zombie-Human Conflict: If one or more Zombies target a cell currently occupied by a Human, one Zombie's move is marked successful, and the targeted Human is flagged for infection. All other entities targeting this cell fail.
+        - Multiple Entities Target Same Empty/Non-Human Cell: If multiple entities target the same cell, and it's not a Zombie-Human infection scenario, *all* intending movers targeting this specific cell fail.
+        - Invalid Target: If a Human targets an occupied cell, or a Zombie targets a cell occupied by another Zombie, the move fails.
+        - Valid Moves: All other moves (e.g., single entity targeting an empty cell) are marked successful.
+    3. Apply State Changes:
+        - Move Entities: Update the grid positions (`x`, `y`) for all entities whose moves were marked successful in the resolution step. Handle visual coordinate adjustments for toroidal wrapping.
+        - Apply Infections: Immediately change the state of any flagged Humans to ZOMBIE. This involves removing the Human entity and creating a new Zombie entity in its place (retaining the ID) on the grid and in the simulation's entity list.
+
+Infection: Occurs when a Zombie successfully moves into a cell occupied by a Human during conflict resolution. The transformation takes effect immediately within the same tick, after all successful moves have been applied.
+
+8. Initial State & Spawning:
+
+The simulation starts with the following entities placed randomly on the grid:
+1 Zombie (on a unique empty cell)
+100 Humans (each on a unique empty cell)
+15 Weapons (on random cells, potentially overlapping visually with entities or other weapons initially)
+Spawning mechanism includes a safeguard against infinite loops when finding empty cells.
+
+9. Visual Style:
+
+Rendered using the HTML Canvas API.
+Displays the 50x50 grid.
+Uses specified block colors: White (Human), Green (Zombie), Red (Weapon).
+Uses a dark grey background color for empty cells.
+Entity movement is visually interpolated between ticks for smoothness.
+
+10. UI Controls:
+
+Basic controls are implemented:
+- Reset: Stops the current simulation and starts a new one with initial entity spawns.
+- Pause/Resume: Toggles pausing and resuming of the simulation ticks and rendering loop.
+- Slow Down: Decreases the simulation ticks per second (minimum 1 TPS).
+- Speed Up: Increases the simulation ticks per second (maximum 20 TPS).
+- Speed Display: Shows the current ticks per second (TPS).
+
+11. Future Considerations (Post v0.2):
+
+Implement obstacles/barriers (impassable cells).
+Implement weapon pickup mechanic and associated Human state/color change (Orange when armed).
+Implement combat (armed human vs. zombie interaction).
+Develop more advanced Human AI (e.g., fleeing from zombies).
+Refine conflict resolution (e.g., handling multiple entities targeting the same empty cell differently).
+
+12. Implementation Notes (Reflecting v0.2 State):
+
+- Movement Conflict Resolution: Current rule for multiple entities targeting the same non-human-occupied cell is that *all* fail. Zombie infection takes priority.
+- Order of Operations: The tick logic follows a clear sequence: determine all intentions -> resolve all conflicts/flag infections -> apply all successful moves -> apply all infections.
+- Human `hasWeapon` State: The attribute exists on Human objects but is currently unused.
+- Entity/Weapon Co-location: Weapons do not occupy the primary movement grid, allowing entities to be in the same logical cell.
+- Initial Spawning Logic: Uses a random placement approach with attempts limits to find unique empty cells for Humans/Zombies. 
