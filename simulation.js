@@ -57,7 +57,7 @@ class Simulation {
     addEntity(entity) {
         entity.id = this.nextEntityId++; // Assign ID here
         this.entities.set(entity.id, entity);
-        if (entity.type === 'HUMAN' || entity.type === 'ZOMBIE') {
+        if (entity.type === 'HUMAN' || entity.type === 'ZOMBIE' || entity.type === 'OBSTACLE') {
              if(this.grid[entity.y][entity.x] === null) {
                  this.grid[entity.y][entity.x] = entity;
              } else {
@@ -88,41 +88,122 @@ class Simulation {
         console.log("Spawning initial entities...");
         const initialCounts = {
             ZOMBIE: 1,
-            HUMAN: 100,
-            WEAPON: 15
+            HUMAN: 100, // These will now spawn anywhere empty
+            WEAPON: 15,
         };
 
+        // --- Spawn Random Houses ---
+        console.log("Spawning random houses...");
+        const numHouses = 8;
+        const houseWidth = 8;
+        const houseHeight = 6;
+        const maxPlacementAttempts = 50; // Tries per house
+        let housesPlaced = 0;
+
+        for (let i = 0; i < numHouses; i++) {
+            let placed = false;
+            for (let attempt = 0; attempt < maxPlacementAttempts && !placed; attempt++) {
+                // 1. Choose random top-left corner, ensuring house fits within grid
+                const startX = this.getRandomInt(this.gridWidth - houseWidth + 1);
+                const startY = this.getRandomInt(this.gridHeight - houseHeight + 1);
+
+                // 2. Check for collisions in the house footprint
+                let collision = false;
+                for (let y = startY; y < startY + houseHeight; y++) {
+                    for (let x = startX; x < startX + houseWidth; x++) {
+                        // Check bounds just in case (shouldn't be needed with startX/Y logic)
+                        if (y < 0 || y >= this.gridHeight || x < 0 || x >= this.gridWidth) continue;
+                        if (this.grid[y][x] !== null) {
+                            collision = true;
+                            break;
+                        }
+                    }
+                    if (collision) break;
+                }
+
+                // 3. If no collision, place the house walls
+                if (!collision) {
+                    const doorX = startX + Math.floor(houseWidth / 2);
+                    const doorY = startY; // Place door on top edge
+
+                    for (let y = startY; y < startY + houseHeight; y++) {
+                        for (let x = startX; x < startX + houseWidth; x++) {
+                            // Check if it's a perimeter wall cell
+                            const isPerimeter = (x === startX || x === startX + houseWidth - 1 || y === startY || y === startY + houseHeight - 1);
+                            
+                            if (isPerimeter) {
+                                // Check if it's the door
+                                const isDoor = (x === doorX && y === doorY);
+                                
+                                if (!isDoor) {
+                                     // Check bounds again before placing
+                                     if (y >= 0 && y < this.gridHeight && x >= 0 && x < this.gridWidth) {
+                                        // Place wall if cell is empty (should be, but double-check)
+                                        if (this.grid[y][x] === null) {
+                                            const obstacle = new Obstacle(x, y);
+                                            this.addEntity(obstacle); // addEntity handles grid update
+                                        }
+                                    } 
+                                }
+                            } 
+                            // Inside the house (not perimeter) or the door cell remains empty (null)
+                        }
+                    }
+                    placed = true;
+                    housesPlaced++;
+                } 
+                // Else (collision), try a different random spot on the next attempt
+            }
+            if (!placed) {
+                console.warn(`Could not place house ${i+1} after ${maxPlacementAttempts} attempts.`);
+            }
+        }
+        console.log(`Placed ${housesPlaced} out of ${numHouses} houses.`);
+        // --- End House Spawning ---
+
+        // --- Spawn Zombies, Humans, and Weapons in remaining empty cells ---
         // Spawn Zombies
         for (let i = 0; i < initialCounts.ZOMBIE; i++) {
-            const pos = this.getRandomEmptyCellForPrimary();
+            const pos = this.getRandomEmptyCellForPrimary(); // Should find cells in streets
             if (pos) {
                 const zombie = new Zombie(pos.x, pos.y);
                 this.addEntity(zombie);
             } else {
-                 console.error("Could not place initial Zombie");
+                 console.error("Could not place initial Zombie - perhaps streets are too full?");
             }
         }
 
         // Spawn Humans
         for (let i = 0; i < initialCounts.HUMAN; i++) {
-            const pos = this.getRandomEmptyCellForPrimary();
+            const pos = this.getRandomEmptyCellForPrimary(); // Should find cells in streets
              if (pos) {
                 const human = new Human(pos.x, pos.y);
                 this.addEntity(human);
             } else {
-                 console.error(`Could not place initial Human ${i+1}`);
+                 console.error(`Could not place initial Human ${i+1} - perhaps streets are too full?`);
             }
         }
-
-        // Spawn Weapons
+        
+        // Spawn Weapons - Can potentially spawn on same cell as Human/Zombie initially
         for (let i = 0; i < initialCounts.WEAPON; i++) {
-            // Ensuring unique weapon positions requires more state tracking.
-            // For now, place randomly, allowing potential visual overlap initially.
-            const pos = this.getRandomCellForWeapon();
+            // Get a random cell, but ideally one that's a 'street'
+            // For now, getRandomCellForWeapon doesn't restrict placement, but pickup logic handles it.
+            // A better approach might be to ensure weapons only spawn on streets too.
+             let pos = this.getRandomCellForWeapon(); // This is just random x,y
+             // Optional: Try to ensure weapon is on a street
+             /* 
+             let attempts = 0;
+             while ((pos.x % streetFrequency !== 0) && (pos.y % streetFrequency !== 0) && attempts < 100) {
+                 pos = this.getRandomCellForWeapon();
+                 attempts++;
+             }
+             if (attempts >= 100) console.warn("Could not easily place weapon on street, placing randomly.");
+             */
+            
             const weapon = new Weapon(pos.x, pos.y);
             this.addEntity(weapon);
         }
-         console.log(`Spawned: ${this.entities.size - this.weapons.size} primary entities, ${this.weapons.size} weapons.`);
+         console.log(`Spawned: ${initialCounts.ZOMBIE} Zombies, ${initialCounts.HUMAN} Humans, ${this.weapons.size} Weapons.`);
     }
 
     getEntityAt(x, y) {
@@ -205,8 +286,15 @@ class Simulation {
             const [targetX, targetY] = targetKey.split(',').map(Number);
             const targetEntity = this.getEntityAt(targetX, targetY); // Entity *currently* at the target location
 
+            // --- Check if target is an Obstacle first --- 
+            if (targetEntity && targetEntity.type === 'OBSTACLE') {
+                // console.log(`Move failed: Target (${targetX},${targetY}) is an Obstacle.`);
+                continue; // No entity can move into an obstacle, skip to next target cell
+            }
+            // --- End Obstacle Check ---
+
             if (occupantIds.length === 1) {
-                // --- Single entity targeting this cell ---
+                // --- Single entity targeting this non-obstacle cell ---
                 const entityId = occupantIds[0];
                 const entity = this.entities.get(entityId);
                  if (!entity) continue; // Skip if entity somehow missing
@@ -223,10 +311,10 @@ class Simulation {
                 } else if (entity.type === 'HUMAN') {
                     if (targetEntity === null) { // Target empty
                         successfulMoves.push({ entityId: entity.id, newX: targetX, newY: targetY });
-                    } // else { Move fails }
+                    } // else { Move fails - target occupied by Human/Zombie, already handled by grid state + obstacle check }
                 }
             } else {
-                // --- Multiple entities targeting the same cell - CONFLICT ---
+                // --- Multiple entities targeting the same non-obstacle cell - CONFLICT ---
                 let zombieInfectsHumanId = null; // Store the ID of a zombie successfully infecting
 
                 // Check if any targeting zombie is infecting a human currently in that cell
