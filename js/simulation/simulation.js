@@ -1,5 +1,8 @@
 // simulation.js
 
+// --- Constants ---
+const HUMAN_WEAPON_COOLDOWN = 5; // Ticks cooldown after attacking
+
 class Simulation {
     constructor(gridWidth, gridHeight) {
         this.gridWidth = gridWidth;
@@ -281,19 +284,24 @@ class Simulation {
         const movingEntities = []; // Keep track of entities that intend to move
 
         this.entities.forEach(entity => {
-            if (entity.type === 'HUMAN' || entity.type === 'ZOMBIE') {
+            // Only gather intentions for entities that CAN move/act
+            if ((entity.type === 'HUMAN' && !entity.hasAttackedThisTick) || entity.type === 'ZOMBIE') {
                 const intent = entity.getIntendedMove(this);
                 if (intent) {
                      intentions.push({ entityId: entity.id, targetX: intent.targetX, targetY: intent.targetY });
                      movingEntities.push(entity); // Add entity itself for potential later use
                 } else {
                     // Handle cases where getIntendedMove might return null/undefined if needed
-                    console.warn(`Entity ${entity.id} did not produce an intended move.`);
+                    // Allow entities to not move without warning
+                    // console.warn(`Entity ${entity.id} did not produce an intended move.`);
                 }
             }
+            // else if (entity.type === 'HUMAN' && entity.hasAttackedThisTick) {
+                // console.log(`Human ${entity.id} attacked this tick, skipping movement intention.`);
+            // }
         });
         // Return both intentions and the list of entities that generated them
-        return { intentions, movingEntities }; 
+        return { intentions, movingEntities };
     }
 
     _resolveConflicts(intentions) {
@@ -470,19 +478,109 @@ class Simulation {
          });
     }
 
+    // New method to handle combat phase
+    _resolveCombat() {
+        const zombiesToRemove = new Set(); // IDs of zombies defeated this tick
+        const zombiesTargetedThisTick = new Set(); // Prevent multiple humans targeting the same zombie
+
+        // Find humans who can potentially attack
+        const potentialAttackers = [];
+        this.entities.forEach(entity => {
+            if (entity.type === 'HUMAN' && entity.hasWeapon && entity.weaponCooldown === 0 && !entity.hasAttackedThisTick) {
+                potentialAttackers.push(entity);
+            }
+        });
+
+        // Randomize attacker order slightly to avoid positional bias if multiple humans can attack the same zombie
+        potentialAttackers.sort(() => Math.random() - 0.5);
+
+        potentialAttackers.forEach(human => {
+             if (human.hasAttackedThisTick) return; // Skip if already attacked (e.g., by an earlier attacker in this loop)
+
+            const adjacentCells = this.getAdjacentCells(human.x, human.y, true); // include Diagonals? Let's say no for now. Use false. TODO: Revisit diagonal attacks?
+            // Let's enable diagonal attacks for now.
+            // const adjacentCells = this.getAdjacentCells(human.x, human.y, true);
+
+            let attackedZombie = false;
+            for (const cell of adjacentCells) {
+                const targetEntity = this.getEntityAt(cell.x, cell.y);
+
+                if (targetEntity && targetEntity.type === 'ZOMBIE' && !zombiesTargetedThisTick.has(targetEntity.id)) {
+                    console.log(`Combat: Human ${human.id} attacks Zombie ${targetEntity.id} at (${cell.x}, ${cell.y})`);
+
+                    zombiesToRemove.add(targetEntity.id);
+                    zombiesTargetedThisTick.add(targetEntity.id); // Mark this zombie as targeted
+
+                    human.weaponCooldown = HUMAN_WEAPON_COOLDOWN;
+                    human.hasAttackedThisTick = true; // Mark human as having acted
+
+                    attackedZombie = true;
+                    break; // Human attacks only one zombie per tick
+                }
+            }
+        });
+
+        // Remove defeated zombies
+        zombiesToRemove.forEach(zombieId => {
+            console.log(`Removing defeated Zombie ${zombieId}`);
+            this.removeEntity(zombieId);
+        });
+    }
+
+    // Helper to get adjacent cell coordinates with toroidal wrapping
+    getAdjacentCells(x, y, includeDiagonals = false) {
+        const adjacent = [];
+        const deltas = [
+            { dx: 0, dy: -1 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 } // Cardinal
+        ];
+        if (includeDiagonals) {
+            deltas.push(
+                { dx: -1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: -1 }, { dx: 1, dy: 1 } // Diagonal
+            );
+        }
+
+        deltas.forEach(delta => {
+            const newX = (x + delta.dx + this.gridWidth) % this.gridWidth;
+            const newY = (y + delta.dy + this.gridHeight) % this.gridHeight;
+            adjacent.push({ x: newX, y: newY });
+        });
+
+        return adjacent;
+    }
+
     tick() {
-        console.log("Tick starting...");
+        // console.log("Tick starting...");
 
-        // 1. Determine Intentions
-        const { intentions, movingEntities } = this._gatherIntentions(); 
+        // 0. Update Cooldowns and Reset Flags
+        this.entities.forEach(entity => {
+            if (entity.type === 'HUMAN') {
+                // Reset attack flag
+                entity.hasAttackedThisTick = false;
+                // Decrease weapon cooldown
+                if (entity.weaponCooldown > 0) {
+                    entity.weaponCooldown--;
+                }
+            }
+            // Reset intention (might be needed if entity didn't move last tick but had one)
+             entity.intendedMove = null;
+        });
 
-        // 2. Resolve Conflicts & Determine Outcomes (Movement/Infection)
+        // 1. Resolve Combat
+        this._resolveCombat();
+
+        // 2. Determine Intentions (only for entities that didn't attack)
+        const { intentions, movingEntities } = this._gatherIntentions();
+
+        // 3. Resolve Conflicts & Determine Outcomes (Movement/Infection)
         const { successfulMoves, infections } = this._resolveConflicts(intentions);
 
-        // 3. Apply State Changes (Movement, Pickups, Infections)
-        this._applyStateChanges(successfulMoves, infections);
-        console.log("Tick finished.");
+        // 4. Apply State Changes (Movement, Pickups, Infections)
+        // Note: Zombie removal already handled in _resolveCombat
+        this._applyStateChanges(successfulMoves, infections); // Infections might override a cell where a zombie *was*
+
+        // console.log("Tick finished.");
     }
 }
 
-// Make available globally for main.js 
+// Make available globally for main.js
+window.Simulation = Simulation; 
