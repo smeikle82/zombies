@@ -6,6 +6,7 @@ class Human extends Entity {
         super(x, y, 'HUMAN');
         this.state = 'ALIVE'; // Might change to INFECTED, then ZOMBIE
         this.hasWeapon = false; // Becomes true when weapon picked up
+        this.weaponCooldown = 0; // Ticks remaining until weapon can be used again
         this.intendedMove = null; // { targetX, targetY }
         this.currentDirection = null; // { dx, dy } - Keep track of the last move
     }
