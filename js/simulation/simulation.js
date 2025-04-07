@@ -93,11 +93,87 @@ class Simulation {
         };
 
         // --- Spawn Random Houses ---
-        console.log("Spawning random houses...");
+        // Constants for house spawning
         const numHouses = 8;
         const houseWidth = 8;
         const houseHeight = 6;
         const maxPlacementAttempts = 50; // Tries per house
+
+        this._spawnHouses(numHouses, houseWidth, houseHeight, maxPlacementAttempts);
+        // --- End House Spawning ---
+
+        // --- Spawn Zombies, Humans, and Weapons in remaining empty cells ---
+        this._spawnZombies(initialCounts.ZOMBIE);
+        this._spawnHumans(initialCounts.HUMAN);
+        this._spawnWeapons(initialCounts.WEAPON);
+
+        console.log(`Spawned: ${initialCounts.ZOMBIE} Zombies, ${initialCounts.HUMAN} Humans, ${this.weapons.size} Weapons.`);
+    }
+
+    _spawnZombies(count) {
+        console.log(`Spawning ${count} zombies...`);
+        for (let i = 0; i < count; i++) {
+            const pos = this.getRandomEmptyCellForPrimary(); // Should find cells in streets
+            if (pos) {
+                const zombie = new Zombie(pos.x, pos.y);
+                this.addEntity(zombie);
+            } else {
+                 console.error("Could not place initial Zombie - perhaps streets are too full?");
+                 // Consider breaking or other error handling if essential
+            }
+        }
+    }
+
+    _spawnHumans(count) {
+        console.log(`Spawning ${count} humans...`);
+        for (let i = 0; i < count; i++) {
+            const pos = this.getRandomEmptyCellForPrimary(); // Should find cells in streets
+             if (pos) {
+                const human = new Human(pos.x, pos.y);
+                this.addEntity(human);
+            } else {
+                 console.error(`Could not place initial Human ${i+1} - perhaps streets are too full?`);
+                 // Consider breaking or other error handling
+            }
+        }
+    }
+
+    _spawnWeapons(count) {
+        console.log(`Spawning ${count} weapons...`);
+        const maxAttemptsPerWeapon = 100; // Prevent infinite loop if no valid spots found
+        let weaponsSpawned = 0;
+
+        for (let i = 0; i < count; i++) {
+            let pos;
+            let attempts = 0;
+            
+            do {
+                pos = this.getRandomCellForWeapon();
+                const entityAtPos = this.getEntityAt(pos.x, pos.y);
+                // Check if the cell is empty OR if it contains something that is NOT an obstacle
+                if (!entityAtPos || entityAtPos.type !== 'OBSTACLE') {
+                     break; // Found a valid spot
+                }
+                attempts++;
+            } while (attempts < maxAttemptsPerWeapon);
+
+            if (attempts >= maxAttemptsPerWeapon) {
+                console.warn(`Could not find a non-obstacle position for weapon ${i+1} after ${maxAttemptsPerWeapon} attempts. Skipping weapon spawn.`);
+                continue; // Skip this weapon if no suitable spot found
+            }
+
+            // We have a valid position 'pos' here
+            const weapon = new Weapon(pos.x, pos.y);
+            this.addEntity(weapon);
+            weaponsSpawned++; // Increment count only if weapon was added
+        }
+        // Log the actual number spawned, as some might fail
+        console.log(`Successfully spawned ${weaponsSpawned} out of ${count} requested weapons.`);
+    }
+
+    // New private method for spawning houses
+    _spawnHouses(numHouses, houseWidth, houseHeight, maxPlacementAttempts) {
+        console.log("Spawning random houses...");
         let housesPlaced = 0;
 
         for (let i = 0; i < numHouses; i++) {
@@ -159,57 +235,6 @@ class Simulation {
             }
         }
         console.log(`Placed ${housesPlaced} out of ${numHouses} houses.`);
-        // --- End House Spawning ---
-
-        // --- Spawn Zombies, Humans, and Weapons in remaining empty cells ---
-        // Spawn Zombies
-        for (let i = 0; i < initialCounts.ZOMBIE; i++) {
-            const pos = this.getRandomEmptyCellForPrimary(); // Should find cells in streets
-            if (pos) {
-                const zombie = new Zombie(pos.x, pos.y);
-                this.addEntity(zombie);
-            } else {
-                 console.error("Could not place initial Zombie - perhaps streets are too full?");
-            }
-        }
-
-        // Spawn Humans
-        for (let i = 0; i < initialCounts.HUMAN; i++) {
-            const pos = this.getRandomEmptyCellForPrimary(); // Should find cells in streets
-             if (pos) {
-                const human = new Human(pos.x, pos.y);
-                this.addEntity(human);
-            } else {
-                 console.error(`Could not place initial Human ${i+1} - perhaps streets are too full?`);
-            }
-        }
-        
-        // Spawn Weapons - Can potentially spawn on same cell as Human/Zombie initially
-        for (let i = 0; i < initialCounts.WEAPON; i++) {
-            let pos;
-            let attempts = 0;
-            const maxAttempts = 100; // Prevent infinite loop if no valid spots found
-
-            do {
-                pos = this.getRandomCellForWeapon();
-                const entityAtPos = this.getEntityAt(pos.x, pos.y);
-                // Check if the cell is empty OR if it contains something that is NOT an obstacle
-                if (!entityAtPos || entityAtPos.type !== 'OBSTACLE') {
-                     break; // Found a valid spot
-                }
-                attempts++;
-            } while (attempts < maxAttempts);
-
-            if (attempts >= maxAttempts) {
-                console.warn("Could not find a non-obstacle position for weapon after", maxAttempts, "attempts. Skipping weapon spawn.");
-                continue; // Skip this weapon if no suitable spot found
-            }
-
-            // We have a valid position 'pos' here
-            const weapon = new Weapon(pos.x, pos.y);
-            this.addEntity(weapon);
-        }
-         console.log(`Spawned: ${initialCounts.ZOMBIE} Zombies, ${initialCounts.HUMAN} Humans, ${this.weapons.size} Weapons.`);
     }
 
     getEntityAt(x, y) {
@@ -251,31 +276,30 @@ class Simulation {
     // Helper for toroidal distance/wrapping calculations if needed later
     // wrapCoordinate(coord, max) { ... }
 
-    tick() {
-        console.log("Tick starting...");
+    _gatherIntentions() {
         const intentions = []; // { entityId, targetX, targetY }
-        const movingEntities = [];
+        const movingEntities = []; // Keep track of entities that intend to move
 
-        // 1. Determine Intentions for mobile entities (Humans, Zombies)
         this.entities.forEach(entity => {
             if (entity.type === 'HUMAN' || entity.type === 'ZOMBIE') {
-                // Ensure intendedMove exists before accessing properties
                 const intent = entity.getIntendedMove(this);
                 if (intent) {
                      intentions.push({ entityId: entity.id, targetX: intent.targetX, targetY: intent.targetY });
-                     movingEntities.push(entity);
+                     movingEntities.push(entity); // Add entity itself for potential later use
                 } else {
                     // Handle cases where getIntendedMove might return null/undefined if needed
                     console.warn(`Entity ${entity.id} did not produce an intended move.`);
                 }
             }
         });
+        // Return both intentions and the list of entities that generated them
+        return { intentions, movingEntities }; 
+    }
 
-        // 2. Resolve Conflicts & Determine Outcomes (Revised Logic)
+    _resolveConflicts(intentions) {
         const successfulMoves = []; // { entityId, newX, newY }
         const infections = new Set();    // Set of human IDs to be infected
         const targetCellOccupants = {}; // track who wants to move where: `${x},${y}` -> [entityId1, entityId2]
-        // No longer need intentionMap if intent is stored on entity
 
         // Group intentions by target cell
         intentions.forEach(intent => {
@@ -350,99 +374,113 @@ class Simulation {
                  // only the explicitly added moves (if any) proceed. Others implicitly fail.
             }
         }
+        return { successfulMoves, infections };
+    }
 
-        // 3. Apply State Changes
-
-        // Apply successful moves (clearing old spots first)
-        const movesToApply = [];
-        successfulMoves.forEach(move => {
-            const entity = this.entities.get(move.entityId);
-            if (!entity) return;
-            // Clear current grid position *before* potentially occupying target
-             if (this.grid[entity.y][entity.x] === entity) {
-                  this.grid[entity.y][entity.x] = null;
-             }
-            movesToApply.push(move);
-        });
-
-        // Update positions and grid for moved entities
-        movesToApply.forEach(move => {
+    _applyStateChanges(successfulMoves, infections) {
+         // Apply successful moves (clearing old spots first)
+         const movesToApply = [];
+         successfulMoves.forEach(move => {
              const entity = this.entities.get(move.entityId);
              if (!entity) return;
+             // Clear current grid position *before* potentially occupying target
+              if (this.grid[entity.y][entity.x] === entity) {
+                   this.grid[entity.y][entity.x] = null;
+              }
+             movesToApply.push(move);
+         });
+ 
+         // Update positions and grid for moved entities
+         movesToApply.forEach(move => {
+              const entity = this.entities.get(move.entityId);
+              if (!entity) return;
+ 
+             // --- Wrap-around visual adjustment ---
+             // Check if the entity wrapped around horizontally
+             if (move.newX === 0 && entity.x === this.gridWidth - 1) {
+                 // Wrapped from right edge to left edge
+                 entity.visualX -= this.gridWidth; // Move visualX off-screen to the left
+                  console.log(`Entity ${entity.id} visualX wrap R->L: ${entity.visualX + this.gridWidth} -> ${entity.visualX}`);
+             } else if (move.newX === this.gridWidth - 1 && entity.x === 0) {
+                 // Wrapped from left edge to right edge
+                 entity.visualX += this.gridWidth; // Move visualX off-screen to the right
+                  console.log(`Entity ${entity.id} visualX wrap L->R: ${entity.visualX - this.gridWidth} -> ${entity.visualX}`);
+             }
+ 
+             // Check if the entity wrapped around vertically
+             if (move.newY === 0 && entity.y === this.gridHeight - 1) {
+                 // Wrapped from bottom edge to top edge
+                 entity.visualY -= this.gridHeight; // Move visualY off-screen upwards
+                  console.log(`Entity ${entity.id} visualY wrap B->T: ${entity.visualY + this.gridHeight} -> ${entity.visualY}`);
+             } else if (move.newY === this.gridHeight - 1 && entity.y === 0) {
+                 // Wrapped from top edge to bottom edge
+                 entity.visualY += this.gridHeight; // Move visualY off-screen downwards
+                  console.log(`Entity ${entity.id} visualY wrap T->B: ${entity.visualY - this.gridHeight} -> ${entity.visualY}`);
+             }
+              // --- End wrap-around adjustment ---
+ 
+             // Update actual grid coordinates
+             entity.x = move.newX;
+             entity.y = move.newY;
+ 
+             // Place the moved entity onto the grid.
+             // If it was an infecting zombie, it temporarily occupies the spot.
+             this.grid[entity.y][entity.x] = entity;
+ 
+             // --- Check for weapon pickup ---
+             if (entity.type === 'HUMAN' && !entity.hasWeapon) { // Only unarmed humans can pick up
+                 let weaponToRemoveId = null;
+                 // Iterate through weapons Map to find if one exists at the new location
+                 for (const [weaponId, weapon] of this.weapons.entries()) {
+                     if (weapon.x === entity.x && weapon.y === entity.y) {
+                         entity.hasWeapon = true;
+                         weaponToRemoveId = weaponId;
+                         console.log(`Human ${entity.id} picked up Weapon ${weaponId} at (${entity.x}, ${entity.y})`);
+                         break; // Assume only one weapon per cell can be picked up per tick
+                     }
+                 }
+                 // If a weapon was found and flagged for removal
+                 if (weaponToRemoveId !== null) {
+                     this.removeEntity(weaponToRemoveId); // Use existing method to remove from this.entities and this.weapons
+                 }
+             }
+              // --- End Check for weapon pickup ---
+         })
+ 
+         // Apply infections (potentially overwriting the grid cell again)
+         infections.forEach(humanId => {
+             const humanEntity = this.entities.get(humanId); // Get the original human object
+             // Check if the entity still exists and is indeed a Human (might have been removed/changed differently)
+             if (humanEntity && humanEntity.type === 'HUMAN') {
+                 console.log(`Applying infection to Human ${humanId} at (${humanEntity.x}, ${humanEntity.y})`);
+ 
+                 const newZombie = new Zombie(humanEntity.x, humanEntity.y);
+                 newZombie.id = humanEntity.id; // Re-use ID
+ 
+                 this.entities.delete(humanId); // Remove human from master list
+                 this.entities.set(newZombie.id, newZombie); // Add new zombie to master list
+ 
+                 // Update the grid to point to the new Zombie object
+                 this.grid[newZombie.y][newZombie.x] = newZombie;
+ 
+                 console.log(`Human ${humanId} turned into Zombie ${newZombie.id}`);
+             } else {
+                  console.warn(`Attempted to infect entity ${humanId}, but it was not found or not a Human.`);
+             }
+         });
+    }
 
-            // --- Wrap-around visual adjustment ---
-            // Check if the entity wrapped around horizontally
-            if (move.newX === 0 && entity.x === this.gridWidth - 1) {
-                // Wrapped from right edge to left edge
-                entity.visualX -= this.gridWidth; // Move visualX off-screen to the left
-                 console.log(`Entity ${entity.id} visualX wrap R->L: ${entity.visualX + this.gridWidth} -> ${entity.visualX}`);
-            } else if (move.newX === this.gridWidth - 1 && entity.x === 0) {
-                // Wrapped from left edge to right edge
-                entity.visualX += this.gridWidth; // Move visualX off-screen to the right
-                 console.log(`Entity ${entity.id} visualX wrap L->R: ${entity.visualX - this.gridWidth} -> ${entity.visualX}`);
-            }
+    tick() {
+        console.log("Tick starting...");
 
-            // Check if the entity wrapped around vertically
-            if (move.newY === 0 && entity.y === this.gridHeight - 1) {
-                // Wrapped from bottom edge to top edge
-                entity.visualY -= this.gridHeight; // Move visualY off-screen upwards
-                 console.log(`Entity ${entity.id} visualY wrap B->T: ${entity.visualY + this.gridHeight} -> ${entity.visualY}`);
-            } else if (move.newY === this.gridHeight - 1 && entity.y === 0) {
-                // Wrapped from top edge to bottom edge
-                entity.visualY += this.gridHeight; // Move visualY off-screen downwards
-                 console.log(`Entity ${entity.id} visualY wrap T->B: ${entity.visualY - this.gridHeight} -> ${entity.visualY}`);
-            }
-             // --- End wrap-around adjustment ---
+        // 1. Determine Intentions
+        const { intentions, movingEntities } = this._gatherIntentions(); 
 
-            // Update actual grid coordinates
-            entity.x = move.newX;
-            entity.y = move.newY;
+        // 2. Resolve Conflicts & Determine Outcomes (Movement/Infection)
+        const { successfulMoves, infections } = this._resolveConflicts(intentions);
 
-            // Place the moved entity onto the grid.
-            // If it was an infecting zombie, it temporarily occupies the spot.
-            this.grid[entity.y][entity.x] = entity;
-
-            // --- Check for weapon pickup ---
-            if (entity.type === 'HUMAN' && !entity.hasWeapon) { // Only unarmed humans can pick up
-                let weaponToRemoveId = null;
-                // Iterate through weapons Map to find if one exists at the new location
-                for (const [weaponId, weapon] of this.weapons.entries()) {
-                    if (weapon.x === entity.x && weapon.y === entity.y) {
-                        entity.hasWeapon = true;
-                        weaponToRemoveId = weaponId;
-                        console.log(`Human ${entity.id} picked up Weapon ${weaponId} at (${entity.x}, ${entity.y})`);
-                        break; // Assume only one weapon per cell can be picked up per tick
-                    }
-                }
-                // If a weapon was found and flagged for removal
-                if (weaponToRemoveId !== null) {
-                    this.removeEntity(weaponToRemoveId); // Use existing method to remove from this.entities and this.weapons
-                }
-            }
-             // --- End Check for weapon pickup ---
-        })
-
-        // Apply infections (potentially overwriting the grid cell again)
-        infections.forEach(humanId => {
-            const humanEntity = this.entities.get(humanId); // Get the original human object
-            // Check if the entity still exists and is indeed a Human (might have been removed/changed differently)
-            if (humanEntity && humanEntity.type === 'HUMAN') {
-                console.log(`Applying infection to Human ${humanId} at (${humanEntity.x}, ${humanEntity.y})`);
-
-                const newZombie = new Zombie(humanEntity.x, humanEntity.y);
-                newZombie.id = humanEntity.id; // Re-use ID
-
-                this.entities.delete(humanId); // Remove human from master list
-                this.entities.set(newZombie.id, newZombie); // Add new zombie to master list
-
-                // Update the grid to point to the new Zombie object
-                this.grid[newZombie.y][newZombie.x] = newZombie;
-
-                console.log(`Human ${humanId} turned into Zombie ${newZombie.id}`);
-            } else {
-                 console.warn(`Attempted to infect entity ${humanId}, but it was not found or not a Human.`);
-            }
-        });
+        // 3. Apply State Changes (Movement, Pickups, Infections)
+        this._applyStateChanges(successfulMoves, infections);
         console.log("Tick finished.");
     }
 }
