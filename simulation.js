@@ -186,20 +186,26 @@ class Simulation {
         
         // Spawn Weapons - Can potentially spawn on same cell as Human/Zombie initially
         for (let i = 0; i < initialCounts.WEAPON; i++) {
-            // Get a random cell, but ideally one that's a 'street'
-            // For now, getRandomCellForWeapon doesn't restrict placement, but pickup logic handles it.
-            // A better approach might be to ensure weapons only spawn on streets too.
-             let pos = this.getRandomCellForWeapon(); // This is just random x,y
-             // Optional: Try to ensure weapon is on a street
-             /* 
-             let attempts = 0;
-             while ((pos.x % streetFrequency !== 0) && (pos.y % streetFrequency !== 0) && attempts < 100) {
-                 pos = this.getRandomCellForWeapon();
-                 attempts++;
-             }
-             if (attempts >= 100) console.warn("Could not easily place weapon on street, placing randomly.");
-             */
-            
+            let pos;
+            let attempts = 0;
+            const maxAttempts = 100; // Prevent infinite loop if no valid spots found
+
+            do {
+                pos = this.getRandomCellForWeapon();
+                const entityAtPos = this.getEntityAt(pos.x, pos.y);
+                // Check if the cell is empty OR if it contains something that is NOT an obstacle
+                if (!entityAtPos || entityAtPos.type !== 'OBSTACLE') {
+                     break; // Found a valid spot
+                }
+                attempts++;
+            } while (attempts < maxAttempts);
+
+            if (attempts >= maxAttempts) {
+                console.warn("Could not find a non-obstacle position for weapon after", maxAttempts, "attempts. Skipping weapon spawn.");
+                continue; // Skip this weapon if no suitable spot found
+            }
+
+            // We have a valid position 'pos' here
             const weapon = new Weapon(pos.x, pos.y);
             this.addEntity(weapon);
         }
