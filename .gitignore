@@ -1,0 +1,5 @@
+# Ignore old spec sheets
+old_spec_sheets/
+
+# Ignore Cursor settings and rules
+.cursor/ 
