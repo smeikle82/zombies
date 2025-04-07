@@ -27,8 +27,16 @@
         <button id="resetButton">Reset</button>
         <button id="pauseResumeButton">Pause</button>
         <button id="slowDownButton">-</button>
-        <span id="speedDisplay">Speed: 2 TPS</span>
+        <span id="speedDisplay">Speed: 8 TPS</span>
         <button id="speedUpButton">+</button>
+        <span class="toggle-group">
+            <input type="checkbox" id="gridToggle" checked>
+            <label for="gridToggle">Grid</label>
+        </span>
+        <span class="toggle-group">
+            <input type="checkbox" id="radiusToggle" checked>
+            <label for="radiusToggle">Radius</label>
+        </span>
     </div>
 
     <canvas id="simulationCanvas"></canvas>

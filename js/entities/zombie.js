@@ -7,6 +7,10 @@ class Zombie extends Entity {
         this.color = 'green';
         this.state = 'ZOMBIE';
         this.intendedMove = null; // { targetX, targetY }
+
+        // Initialize visual coordinates immediately
+        this.visualX = this.x;
+        this.visualY = this.y;
     }
 
     getIntendedMove(simulation) {
