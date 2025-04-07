@@ -67,6 +67,10 @@ document.addEventListener('DOMContentLoaded', () => {
                      context.fillStyle = entity.color;
                      context.fillRect(entity.x * cellSize, entity.y * cellSize, cellSize, cellSize);
                 }
+            } else if (entity.type === 'OBSTACLE') {
+                // Obstacles don't interpolate, draw at grid position
+                context.fillStyle = entity.color;
+                context.fillRect(entity.x * cellSize, entity.y * cellSize, cellSize, cellSize);
             }
         }
 

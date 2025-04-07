@@ -149,5 +149,12 @@ class Weapon extends Entity {
     }
 }
 
+class Obstacle extends Entity {
+    constructor(x, y) {
+        super(x, y, 'OBSTACLE');
+        this.color = 'gray'; // Or whatever color you prefer for walls
+    }
+}
+
 // Export or make available globally depending on module system
 // For simple setup, they will be global if script is included before simulation.js 
