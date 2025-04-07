@@ -260,6 +260,26 @@ class Simulation {
         return dx + dy;
     }
 
+    // Calculates the Octile distance between two points on a toroidal grid.
+    // Suitable heuristic for A* with 8-directional movement.
+    // Cost: Cardinal=1, Diagonal=sqrt(2)
+    calculateToroidalOctileDistance(x1, y1, x2, y2) {
+        let dx = Math.abs(x1 - x2);
+        let dy = Math.abs(y1 - y2);
+
+        // Consider wrap-around
+        if (dx > this.gridWidth / 2) {
+            dx = this.gridWidth - dx;
+        }
+        if (dy > this.gridHeight / 2) {
+            dy = this.gridHeight - dy;
+        }
+
+        const F = Math.SQRT2 - 1; // Cost difference (sqrt(2) - 1)
+        return (dx > dy) ? (F * dy + dx) : (F * dx + dy); // Octile formula
+        // Equivalent to: return Math.max(dx, dy) + F * Math.min(dx, dy);
+    }
+
     findNearestHuman(zombieX, zombieY) {
         let nearestHuman = null;
         let minDistance = Infinity;
@@ -483,9 +503,8 @@ class Simulation {
         potentialAttackers.forEach(human => {
              if (human.hasAttackedThisTick) return; // Skip if already attacked (e.g., by an earlier attacker in this loop)
 
-            const adjacentCells = this.getAdjacentCells(human.x, human.y, true); // include Diagonals? Let's say no for now. Use false. TODO: Revisit diagonal attacks?
-            // Let's enable diagonal attacks for now.
-            // const adjacentCells = this.getAdjacentCells(human.x, human.y, true);
+            // Get adjacent cells, INCLUDING diagonals for attack check
+            const adjacentCells = this.getAdjacentCells(human.x, human.y, true); 
 
             let attackedZombie = false;
             for (const cell of adjacentCells) {
@@ -614,97 +633,168 @@ class Simulation {
     }
 
     /**
-     * Determines the best single step (move) towards a target coordinate.
+     * Determines the best single step (move) towards a target coordinate using A* with 8-directional movement.
      * Considers toroidal distance and obstacles.
      * @param {number} startX - The starting X coordinate.
      * @param {number} startY - The starting Y coordinate.
      * @param {number} targetX - The target X coordinate.
      * @param {number} targetY - The target Y coordinate.
+     * @param {Entity} [movingEntity=null] - Optional: The entity attempting the move, used for context-specific pathfinding rules.
      * @returns {{targetX: number, targetY: number}|null} The coordinates of the best next cell, or null if no valid move improves distance.
      */
-    getMoveTowards(startX, startY, targetX, targetY) {
-        // If already at the target, no move needed
-        if (startX === targetX && startY === targetY) {
-            return null;
-        }
+    getMoveTowards(startX, startY, targetX, targetY, movingEntity = null) {
+        // --- A* Pathfinding Implementation ---
 
-        const queue = [];
-        const visited = new Set();
-        const parentMap = new Map(); // To reconstruct the path
+        // Handle start === target
+        if (startX === targetX && startY === targetY) { return null; }
 
-        const startKey = `${startX},${startY}`;
-        visited.add(startKey);
-        queue.push({ x: startX, y: startY });
-        parentMap.set(startKey, null); // Start has no parent
+        // Helper function for heuristic (Octile distance with toroidal wrap)
+        const heuristic = (x1, y1, x2, y2) => {
+            return this.calculateToroidalOctileDistance(x1, y1, x2, y2);
+        };
 
-        let targetFound = false;
-        let current = null;
-        const maxSearchSteps = this.gridWidth * this.gridHeight; // Safety break
+        const startNode = {
+            x: startX,
+            y: startY,
+            gCost: 0,
+            hCost: heuristic(startX, startY, targetX, targetY),
+            fCost: 0, // Will be set below
+            parent: null
+        };
+        startNode.fCost = startNode.gCost + startNode.hCost;
+
+        const openSet = [startNode]; // Array acting as a simple priority queue
+        const closedSet = new Set(); // Stores "x,y" keys of evaluated nodes
+        const nodeMap = new Map();   // Stores node objects by "x,y" key for quick lookup
+        nodeMap.set(`${startX},${startY}`, startNode);
+
+        const maxSteps = this.gridWidth * this.gridHeight * 2; // Generous safety break
         let steps = 0;
 
-        while (queue.length > 0 && steps < maxSearchSteps) {
-            current = queue.shift();
+        while (openSet.length > 0 && steps < maxSteps) {
             steps++;
 
-            if (current.x === targetX && current.y === targetY) {
-                targetFound = true;
-                break;
-            }
+            // --- Find and remove node with lowest fCost from openSet ---
+            openSet.sort((a, b) => a.fCost - b.fCost); // Sort to simulate priority queue
+            const currentNode = openSet.shift();
+            const currentKey = `${currentNode.x},${currentNode.y}`;
+            // ---------------------------------------------------------
 
-            // Explore neighbors (cardinal directions only)
+            // Add to closed set (we've processed this node)
+            closedSet.add(currentKey);
+
+            // --- Target Found: Reconstruct Path --- 
+            if (currentNode.x === targetX && currentNode.y === targetY) {
+                let pathNode = currentNode;
+                let parent = pathNode.parent;
+
+                // Traverse back until the node whose parent is the start node
+                while (parent && parent.parent !== null) {
+                    pathNode = parent;
+                    parent = pathNode.parent;
+                }
+
+                // If parent is null, we started AT the target (handled at the top).
+                // If parent.parent is null, then 'parent' is the startNode, and pathNode is the first step.
+                if (parent) { // Ensure parent exists (i.e., we didn't start AT the target)
+                     // console.log(`DEBUG A*: Path found! First step: (${pathNode.x}, ${pathNode.y})`);
+                     return { targetX: pathNode.x, targetY: pathNode.y };
+                } else if (pathNode !== startNode) {
+                     // This case handles when the target is directly adjacent to the start
+                     // parent is startNode (parent.parent is null), pathNode is the target itself
+                     // console.log(`DEBUG A*: Path found! Target is adjacent: (${pathNode.x}, ${pathNode.y})`);
+                     return { targetX: pathNode.x, targetY: pathNode.y };
+                 } else {
+                      // Should not happen if start != target
+                      console.error("A* path reconstruction failed: parent is null but pathNode is startNode.");
+                      return null;
+                 }
+            }
+            // --- End Target Found --- 
+
+            // --- Explore Neighbors (8 Directions) --- 
             const possibleMoves = [
-                { dx: 0, dy: -1 }, // Up
-                { dx: 0, dy: 1 },  // Down
-                { dx: -1, dy: 0 }, // Left
-                { dx: 1, dy: 0 }   // Right
+                // Cardinal (cost 1)
+                { dx: 0, dy: -1, cost: 1 }, // Up
+                { dx: 0, dy: 1, cost: 1 },  // Down
+                { dx: -1, dy: 0, cost: 1 }, // Left
+                { dx: 1, dy: 0, cost: 1 },  // Right
+                // Diagonal (cost sqrt(2))
+                { dx: -1, dy: -1, cost: Math.SQRT2 }, // Up-Left
+                { dx: -1, dy: 1, cost: Math.SQRT2 },  // Down-Left
+                { dx: 1, dy: -1, cost: Math.SQRT2 },  // Up-Right
+                { dx: 1, dy: 1, cost: Math.SQRT2 }   // Down-Right
             ];
 
-            // --- Explore Neighbors --- 
-            // Shuffle moves slightly to avoid bias in path choice if multiple shortest paths exist
-            possibleMoves.sort(() => Math.random() - 0.5);
-
             for (const move of possibleMoves) {
-                let nextX = (current.x + move.dx + this.gridWidth) % this.gridWidth;
-                let nextY = (current.y + move.dy + this.gridHeight) % this.gridHeight;
-                const nextKey = `${nextX},${nextY}`;
+                const nextX = (currentNode.x + move.dx + this.gridWidth) % this.gridWidth;
+                const nextY = (currentNode.y + move.dy + this.gridHeight) % this.gridHeight;
+                const neighborKey = `${nextX},${nextY}`;
 
-                if (!visited.has(nextKey)) {
-                    const entityAtNext = this.getEntityAt(nextX, nextY);
-                    // Check if the cell is valid (empty or non-obstacle)
-                    if (entityAtNext === null || (entityAtNext && entityAtNext.type !== 'OBSTACLE')) {
-                        visited.add(nextKey);
-                        parentMap.set(nextKey, current); // Store parent for path reconstruction
-                        queue.push({ x: nextX, y: nextY });
+                // Skip if already evaluated
+                if (closedSet.has(neighborKey)) {
+                    continue;
+                }
+
+                // --- Check Validity (Obstacles & Corner Cutting) --- 
+                const entityAtNext = this.getEntityAt(nextX, nextY);
+                if (entityAtNext && entityAtNext.type === 'OBSTACLE') {
+                     // console.log(`DEBUG A*: Neighbor (${nextX},${nextY}) skipped, is OBSTACLE.`);
+                    continue; // Cannot move directly into an obstacle
+                }
+
+                // Corner Cutting Prevention (for diagonal moves)
+                if (move.cost > 1) { // If it's a diagonal move
+                    const adjacentX1 = (currentNode.x + move.dx + this.gridWidth) % this.gridWidth; // Check cell at (curr.x + dx, curr.y)
+                    const entityAdj1 = this.getEntityAt(adjacentX1, currentNode.y);
+
+                    const adjacentY2 = (currentNode.y + move.dy + this.gridHeight) % this.gridHeight; // Check cell at (curr.x, curr.y + dy)
+                    const entityAdj2 = this.getEntityAt(currentNode.x, adjacentY2);
+
+                    if ((entityAdj1 && entityAdj1.type === 'OBSTACLE') || (entityAdj2 && entityAdj2.type === 'OBSTACLE')) {
+                        // console.log(`DEBUG A*: Diagonal move to (${nextX},${nextY}) skipped, corner cutting blocked.`);
+                        continue; // Cannot cut corner past an obstacle
                     }
                 }
+                // --- End Validity Check --- 
+
+                // Calculate costs for this neighbor
+                const tentativeGCost = currentNode.gCost + move.cost; // USE MOVE COST
+                const neighborHCost = heuristic(nextX, nextY, targetX, targetY);
+                const neighborFCost = tentativeGCost + neighborHCost;
+
+                // Check if neighbor is in openSet or if this path is better
+                const existingNode = nodeMap.get(neighborKey);
+
+                if (!existingNode || tentativeGCost < existingNode.gCost) {
+                    // Found a better path OR it's a new node we haven't seen
+
+                    // Get or create the node object
+                    const neighborNode = existingNode || { x: nextX, y: nextY, parent: null, gCost: Infinity, hCost: Infinity, fCost: Infinity };
+
+                    // Update its properties
+                    neighborNode.parent = currentNode;
+                    neighborNode.gCost = tentativeGCost;
+                    neighborNode.hCost = neighborHCost;
+                    neighborNode.fCost = neighborFCost;
+
+                    nodeMap.set(neighborKey, neighborNode); // Update/add to map
+
+                    // Add to openSet if it's not already there (to be processed)
+                    if (!existingNode) {
+                        openSet.push(neighborNode);
+                         // console.log(`DEBUG A*: Added neighbor (${nextX},${nextY}) to openSet. fCost: ${neighborFCost}`);
+                    }
+                    // If it *was* already in openSet, the sort at the start of the while
+                    // loop will ensure we pick the one with the potentially updated lower fCost next time.
+                }
             }
-             // --- End Explore Neighbors ---
+            // --- End Explore Neighbors --- 
         }
 
-        if (targetFound) {
-            // Reconstruct the path backwards to find the first step from the start
-            let pathNode = current; // 'current' holds the target node info
-            let parent = parentMap.get(`${pathNode.x},${pathNode.y}`);
-
-            // Traverse back until we find the node whose parent is the start node
-            while (parent && (parent.x !== startX || parent.y !== startY)) {
-                pathNode = parent;
-                parent = parentMap.get(`${pathNode.x},${pathNode.y}`);
-            }
-
-            // If parent is null, it means start === target, handled earlier.
-            // Otherwise, pathNode is the first step taken from the start node.
-            if (parent && parent.x === startX && parent.y === startY) {
-                return { targetX: pathNode.x, targetY: pathNode.y };
-            } else {
-                 // Should not happen if targetFound is true and start !== target
-                 console.error("BFS path reconstruction failed unexpectedly.", {startX, startY, targetX, targetY});
-                 return null;
-            }
-        } else {
-            // Target not found or BFS limit reached
-            return null;
-        }
+        // No path found within maxSteps
+        // console.warn(`A* pathfinding failed from (${startX},${startY}) to (${targetX},${targetY}) after ${steps} steps.`);
+        return null;
     }
 }
 

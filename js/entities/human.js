@@ -51,7 +51,7 @@ class Human extends Entity {
             const nearestZombie = simulation.findNearestEntity(this.x, this.y, 'ZOMBIE', 10);
             if (nearestZombie) {
                 console.log(`DEBUG Human ${this.id} (${this.x},${this.y}): Found nearest Z ${nearestZombie.id} at (${nearestZombie.x},${nearestZombie.y}). Attempting pathfinding.`);
-                this.intendedMove = simulation.getMoveTowards(this.x, this.y, nearestZombie.x, nearestZombie.y);
+                this.intendedMove = simulation.getMoveTowards(this.x, this.y, nearestZombie.x, nearestZombie.y, this);
                 if (this.intendedMove) {
                      console.log(`DEBUG Human ${this.id} (${this.x},${this.y}): Path found to Z. Intended move: (${this.intendedMove.targetX},${this.intendedMove.targetY})`);
                     return this.intendedMove;
@@ -67,7 +67,7 @@ class Human extends Entity {
             const nearestArmedHuman = simulation.findNearestEntity(this.x, this.y, 'HUMAN', 10, (human) => human.hasWeapon && human !== this);
             if (nearestArmedHuman) {
                  console.log(`DEBUG Human ${this.id} (${this.x},${this.y}): Found nearest armed H ${nearestArmedHuman.id} at (${nearestArmedHuman.x},${nearestArmedHuman.y}). Attempting pathfinding.`);
-                this.intendedMove = simulation.getMoveTowards(this.x, this.y, nearestArmedHuman.x, nearestArmedHuman.y);
+                this.intendedMove = simulation.getMoveTowards(this.x, this.y, nearestArmedHuman.x, nearestArmedHuman.y, this);
                 if (this.intendedMove) {
                     console.log(`DEBUG Human ${this.id} (${this.x},${this.y}): Path found to armed H. Intended move: (${this.intendedMove.targetX},${this.intendedMove.targetY})`);
                     return this.intendedMove;
@@ -92,7 +92,7 @@ class Human extends Entity {
             // Priority 1: Move towards nearest armed human (any distance)
             const nearestArmedHuman = simulation.findNearestEntity(this.x, this.y, 'HUMAN', Infinity, (human) => human.hasWeapon && human !== this);
             if (nearestArmedHuman) {
-                const move = simulation.getMoveTowards(this.x, this.y, nearestArmedHuman.x, nearestArmedHuman.y);
+                const move = simulation.getMoveTowards(this.x, this.y, nearestArmedHuman.x, nearestArmedHuman.y, this);
                 if (move) {
                     this.intendedMove = move;
                     // console.log(`Unarmed Human ${this.id} at (${this.x}, ${this.y}) moving towards armed human ${nearestArmedHuman.id} at (${nearestArmedHuman.x}, ${nearestArmedHuman.y}), intended: (${this.intendedMove.targetX}, ${this.intendedMove.targetY})`);
